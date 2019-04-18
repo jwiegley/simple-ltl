@@ -8,7 +8,7 @@ import GHC.Generics
 
 data LTL a
   = Top
-  | Bottom
+  | Bottom  String
   | Accept  (a -> LTL a)
   | Reject  (a -> LTL a)
   | And     (LTL a) (LTL a)
@@ -22,7 +22,7 @@ data LTL a
 instance Show (LTL a) where
   show = \case
     Top         -> "Top"
-    Bottom      -> "Bottom"
+    Bottom e    -> "Bottom " ++ show e
     Accept _    -> "Accept"
     Reject _    -> "Reject"
     And p q     -> "And " ++ show p ++ " " ++ show q
@@ -44,7 +44,7 @@ instance Show b => Show (Machine a b) where
     Query _ -> "Query"
 
 data Reason a
-  = HitBottom
+  = HitBottom   String
   | Rejected    a
   | BothFailed  (Reason a) (Reason a)
   | LeftFailed  (Reason a)
@@ -100,7 +100,7 @@ expand :: LTL a -> LTL a
 expand l =
   case l of
     Top         -> l
-    Bottom      -> l
+    Bottom _    -> l
     Accept v    -> Accept (expand . v)
     Reject v    -> Reject (expand . v)
     And p q     -> And (expand p) (expand q)
@@ -114,7 +114,7 @@ compile l = compile' (expand l)
   where
   compile' = \case
     Top      -> Stop Success
-    Bottom   -> Stop (Failure HitBottom)
+    Bottom e -> Stop (Failure (HitBottom e))
 
     Accept v -> Query (compile' . expand . v)
     Reject v -> Query $ \x ->
@@ -130,24 +130,24 @@ compile l = compile' (expand l)
     Until _ _   -> error "never called due to expand"
     Release _ _ -> error "never called due to expand"
 
-negated :: LTL a -> LTL a
-negated l =
+neg :: LTL a -> LTL a
+neg l =
   case l of
-    Top         -> Bottom
-    Bottom      -> Top
+    Top         -> Bottom "neg"
+    Bottom _    -> Top
     Accept v    -> Reject v
     Reject v    -> Accept v
-    And p q     -> Or (negated p) (negated q)
-    Or p q      -> And (negated p) (negated q)
-    Next p      -> Next (negated p)
-    Until p q   -> Release (negated p) (negated q)
-    Release p q -> Until (negated p) (negated q)
+    And p q     -> Or (neg p) (neg q)
+    Or p q      -> And (neg p) (neg q)
+    Next p      -> Next (neg p)
+    Until p q   -> Release (neg p) (neg q)
+    Release p q -> Until (neg p) (neg q)
 
 top :: LTL a
 top = Top
 
 bottom :: LTL a
-bottom = Bottom
+bottom = Bottom "bottom"
 
 accept :: (a -> LTL a) -> LTL a
 accept = Accept
@@ -171,16 +171,16 @@ release :: LTL a -> LTL a -> LTL a
 release = Release
 
 implies :: LTL a -> LTL a -> LTL a
-implies p q = Or (negated p) q
+implies p q = Or (neg p) q
 
 eventually :: LTL a -> LTL a
 eventually p = Until Top p
 
 always :: LTL a -> LTL a
-always p = Release Bottom p
+always p = Release (Bottom "always") p
 
 truth :: Bool -> LTL a
-truth b = if b then Top else Bottom
+truth b = if b then Top else Bottom "truth"
 
 eq :: Eq a => a -> LTL a
 eq n = Accept $ \x -> truth (x == n)

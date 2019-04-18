@@ -26,7 +26,7 @@ match' :: Regex -> (String -> LTL String) -> LTL String
 match' regex k = Accept $ \input ->
   case scan regex input of
     (_, x : _xs) : _ -> k x
-    _ -> Bottom
+    _ -> Bottom "match"
 
 whenMatch :: Regex -> (String -> LTL String) -> LTL String
 whenMatch regex k = Accept $ \input ->
