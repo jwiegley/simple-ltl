@@ -29,6 +29,12 @@ module LTL
 
 import GHC.Generics
 
+-- | This formulation of LTL is in positive normal form by construction, and
+--   trivially dualizable. This choice was driven by the following Coq
+--   formalization, showing that all the laws for LTL hold under a denotation
+--   from this structure into Coq's logic, over all finite lists:
+--
+--   https://github.com/jwiegley/constructive-ltl/blob/master/src/LTL.v#L69
 data LTL a
   = Top
   | Bottom  String
