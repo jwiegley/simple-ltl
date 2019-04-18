@@ -81,31 +81,27 @@ data Result a
 
 combine :: Machine a (Result a) -> Machine a (Result a)
         -> Machine a (Result a)
-combine f g =
-  case (f, g) of
-    (Stop (Failure e), _) -> Stop (Failure (LeftFailed e))
-    (_, Stop (Failure e)) -> Stop (Failure (RightFailed e))
-    (f', Stop Success)    -> f'
-    (Stop Success, g')    -> g'
-    (Delay f', Delay g')  -> Delay (combine f' g')
-    (Delay f', Query g')  -> Query (\a -> combine (Delay f') (g' a))
-    (Query f', Delay g')  -> Query (\a -> combine (f' a) (Delay g'))
-    (Query f', Query g')  -> Query (\a -> combine (f' a) (g' a))
+combine (Stop (Failure e)) _  = Stop (Failure (LeftFailed e))
+combine _ (Stop (Failure e))  = Stop (Failure (RightFailed e))
+combine (Delay f') (Delay g') = Delay (combine f' g')
+combine (Query f') (Query g') = Query (\a -> combine (f' a) (g' a))
+combine f (Query g')          = Query (\a -> combine f (g' a))
+combine (Query f') g          = Query (\a -> combine (f' a) g)
+combine f' (Stop Success)     = f'
+combine (Stop Success) g'     = g'
 
 select :: Machine a (Result a) -> Machine a (Result a)
        -> Machine a (Result a)
-select f g =
-  case (f, g) of
-    (Stop (Failure e1),
-     Stop (Failure e2))    -> Stop (Failure (BothFailed e1 e2))
-    (Stop Success, _)      -> Stop Success
-    (_, Stop Success)      -> Stop Success
-    (Stop (Failure _), g') -> g'
-    (f', Stop (Failure _)) -> f'
-    (Delay f', Delay g')   -> Delay (select f' g')
-    (Delay f', Query g')   -> Query (\a -> select (Delay f') (g' a))
-    (Query f', Delay g')   -> Query (\a -> select (f' a) (Delay g'))
-    (Query f', Query g')   -> Query (\a -> select (f' a) (g' a))
+select (Stop (Failure e1))
+       (Stop (Failure e2))   = Stop (Failure (BothFailed e1 e2))
+select (Stop Success) _      = Stop Success
+select _ (Stop Success)      = Stop Success
+select (Delay f') (Delay g') = Delay (select f' g')
+select (Query f') (Query g') = Query (\a -> select (f' a) (g' a))
+select f (Query g')          = Query (\a -> select f (g' a))
+select (Query f') g          = Query (\a -> select (f' a) g)
+select (Stop (Failure _)) g' = g'
+select f' (Stop (Failure _)) = f'
 
 compile :: LTL a -> Machine a (Result a)
 compile = \case
@@ -127,17 +123,16 @@ compile = \case
   Release p q -> compile (And q (Or p (Next (Release p q))))
 
 neg :: LTL a -> LTL a
-neg l =
-  case l of
-    Top         -> Bottom "neg"
-    Bottom _    -> Top
-    Accept v    -> Reject v
-    Reject v    -> Accept v
-    And p q     -> Or (neg p) (neg q)
-    Or p q      -> And (neg p) (neg q)
-    Next p      -> Next (neg p)
-    Until p q   -> Release (neg p) (neg q)
-    Release p q -> Until (neg p) (neg q)
+neg = \case
+  Top         -> Bottom "neg"
+  Bottom _    -> Top
+  Accept v    -> Reject v
+  Reject v    -> Accept v
+  And p q     -> Or (neg p) (neg q)
+  Or p q      -> And (neg p) (neg q)
+  Next p      -> Next (neg p)
+  Until p q   -> Release (neg p) (neg q)
+  Release p q -> Until (neg p) (neg q)
 
 step :: Machine a b -> a -> Machine a b
 step m x = case m of
@@ -146,10 +141,9 @@ step m x = case m of
   Query f -> step (f x) x
 
 run :: Machine a b -> [a] -> Machine a b
-run m l =
-  case l of
-    []     -> m
-    x : xs -> run (step m x) xs
+run m = \case
+  []     -> m
+  x : xs -> run (step m x) xs
 
 top :: LTL a
 top = Top
@@ -191,4 +185,7 @@ truth :: Bool -> LTL a
 truth b = if b then Top else Bottom "truth"
 
 eq :: Eq a => a -> LTL a
-eq n = Accept $ \x -> truth (x == n)
+eq n = Accept $ truth . (== n)
+
+test :: Machine Int (Result Int)
+test = run (compile (implies (eq 2) (Bottom "here"))) [2]
