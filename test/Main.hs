@@ -39,6 +39,10 @@ compiled regex =
   either (error $ "regexp failed to compile: " ++ show regex) id
     $ compileM regex []
 
+test :: Machine Int (Result Int)
+test = run (compile (implies (eq 2) (eventually (eq 4))))
+           [1, 2, 3, 4]
+
 main :: IO ()
 main = defaultMain $ testGroup "LTL tests"
   [ testCase "string match" $ do

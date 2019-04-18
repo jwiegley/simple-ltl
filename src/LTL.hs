@@ -2,7 +2,30 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE LambdaCase #-}
 
-module LTL where
+module LTL
+  ( LTL(..)
+  , Machine(..)
+  , Reason(..)
+  , Result(..)
+  , compile
+  , step
+  , run
+  , neg
+  , top
+  , bottom
+  , accept
+  , reject
+  , LTL.and
+  , LTL.or
+  , next
+  , LTL.until
+  , release
+  , implies
+  , eventually
+  , always
+  , truth
+  , eq
+  ) where
 
 import GHC.Generics
 
@@ -84,51 +107,24 @@ select f g =
     (Query f', Delay g')   -> Query (\a -> select (f' a) (Delay g'))
     (Query f', Query g')   -> Query (\a -> select (f' a) (g' a))
 
-step :: Machine a b -> a -> Machine a b
-step m x = case m of
-  Stop r  -> Stop r
-  Delay n -> n
-  Query f -> step (f x) x
-
-run :: Machine a b -> [a] -> Machine a b
-run m l =
-  case l of
-    []     -> m
-    x : xs -> run (step m x) xs
-
-expand :: LTL a -> LTL a
-expand l =
-  case l of
-    Top         -> l
-    Bottom _    -> l
-    Accept v    -> Accept (expand . v)
-    Reject v    -> Reject (expand . v)
-    And p q     -> And (expand p) (expand q)
-    Or p q      -> Or (expand p) (expand q)
-    Next p      -> Next (expand p)
-    Until p q   -> Or (expand q) (And (expand p) (Next (Until p q)))
-    Release p q -> And (expand q) (Or (expand p) (Next (Release p q)))
-
 compile :: LTL a -> Machine a (Result a)
-compile l = compile' (expand l)
-  where
-  compile' = \case
-    Top      -> Stop Success
-    Bottom e -> Stop (Failure (HitBottom e))
+compile = \case
+  Top         -> Stop Success
+  Bottom e    -> Stop (Failure (HitBottom e))
 
-    Accept v -> Query (compile' . expand . v)
-    Reject v -> Query $ \x ->
-      fmap (\case Failure _ -> Success
-                  Success   -> Failure (Rejected x))
-           (compile' (expand (v x)))
+  Accept v    -> Query (compile . v)
+  Reject v    -> Query $ \x ->
+    fmap (\case Failure _ -> Success
+                Success   -> Failure (Rejected x))
+         (compile (v x))
 
-    And p q  -> combine (compile' p) (compile' q)
-    Or p q   -> select (compile' p) (compile' q)
+  And p q     -> combine (compile p) (compile q)
+  Or p q      -> select (compile p) (compile q)
 
-    Next p   -> Delay (compile' (expand p))
+  Next p      -> Delay (compile p)
 
-    Until _ _   -> error "never called due to expand"
-    Release _ _ -> error "never called due to expand"
+  Until p q   -> compile (Or q (And p (Next (Until p q))))
+  Release p q -> compile (And q (Or p (Next (Release p q))))
 
 neg :: LTL a -> LTL a
 neg l =
@@ -142,6 +138,18 @@ neg l =
     Next p      -> Next (neg p)
     Until p q   -> Release (neg p) (neg q)
     Release p q -> Until (neg p) (neg q)
+
+step :: Machine a b -> a -> Machine a b
+step m x = case m of
+  Stop r  -> Stop r
+  Delay n -> n
+  Query f -> step (f x) x
+
+run :: Machine a b -> [a] -> Machine a b
+run m l =
+  case l of
+    []     -> m
+    x : xs -> run (step m x) xs
 
 top :: LTL a
 top = Top
@@ -184,7 +192,3 @@ truth b = if b then Top else Bottom "truth"
 
 eq :: Eq a => a -> LTL a
 eq n = Accept $ \x -> truth (x == n)
-
-test :: Machine Int (Result Int)
-test = run (compile (implies (eq 2) (eventually (eq 4))))
-           [1, 2, 3, 4]
