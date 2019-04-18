@@ -1,7 +1,7 @@
-name:                log-analyzer
+name:                simple-ltl
 version:             0.1.0.0
-synopsis:            Analyze log files using LTL
-homepage:            https://www.github.com/jwiegley/log-analyzer
+synopsis:            A simple LTL checker
+homepage:            https://www.github.com/jwiegley/simple-ltl
 license:             BSD3
 license-file:        LICENSE
 author:              John Wiegley
@@ -24,3 +24,4 @@ test-suite test
   hs-source-dirs:   test
   build-depends:       
       base             >=4.9  && < 5.0
+    , QuickCheck
