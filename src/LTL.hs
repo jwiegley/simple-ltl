@@ -143,6 +143,33 @@ negated l =
     Until p q   -> Release (negated p) (negated q)
     Release p q -> Until (negated p) (negated q)
 
+top :: LTL a
+top = Top
+
+bottom :: LTL a
+bottom = Bottom
+
+accept :: (a -> LTL a) -> LTL a
+accept = Accept
+
+reject :: (a -> LTL a) -> LTL a
+reject = Reject
+
+and :: LTL a -> LTL a -> LTL a
+and = And
+
+or :: LTL a -> LTL a -> LTL a
+or = Or
+
+next :: LTL a -> LTL a
+next = Next
+
+until :: LTL a -> LTL a -> LTL a
+until = Until
+
+release :: LTL a -> LTL a -> LTL a
+release = Release
+
 implies :: LTL a -> LTL a -> LTL a
 implies p q = Or (negated p) q
 

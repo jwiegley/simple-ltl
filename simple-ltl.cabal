@@ -24,4 +24,10 @@ test-suite test
   hs-source-dirs:   test
   build-depends:       
       base             >=4.9  && < 5.0
-    , QuickCheck
+    , simple-ltl
+    , bytestring
+    , pcre-heavy
+    , tasty
+    , tasty-hunit
+    -- , hedgehog
+    -- , tasty-hedgehog
