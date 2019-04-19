@@ -1,6 +1,12 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE LambdaCase #-}
+
+-- | This formulation of LTL is in positive normal form by construction, and
+--   trivially dualizable. This choice was driven by the following Coq
+--   formalization, showing that all the laws for LTL hold under a denotation
+--   from this structure into Coq's logic, over all finite lists:
+--
+--   https://github.com/jwiegley/constructive-ltl/blob/master/src/LTL.v#L69
 
 module LTL
   ( Machine(..)
@@ -8,6 +14,7 @@ module LTL
   , Result(..)
   , step
   , run
+
   , neg
   , top
   , bottom
@@ -27,40 +34,13 @@ module LTL
   , test
   ) where
 
-import GHC.Generics
 import Prelude hiding (and, or, until)
-
--- | This formulation of LTL is in positive normal form by construction, and
---   trivially dualizable. This choice was driven by the following Coq
---   formalization, showing that all the laws for LTL hold under a denotation
---   from this structure into Coq's logic, over all finite lists:
---
---   https://github.com/jwiegley/constructive-ltl/blob/master/src/LTL.v#L69
 
 data Machine a b
   = Stop b
   | Delay (Machine a b)
   | Ask (a -> Machine a b)
-  deriving (Generic, Functor)
-
-instance Applicative (Machine a) where
-  pure = Stop
-
-  Stop f  <*> Stop x  = Stop (f x)
-  Stop f  <*> Delay x = Delay (Stop f <*> x)
-  Stop f  <*> Ask x   = Ask $ \a -> Stop f <*> x a
-  Delay f <*> Stop x  = Delay (f <*> Stop x)
-  Delay f <*> Delay x = Delay (f <*> x)
-  Delay f <*> Ask x   = Ask $ \a -> Delay f <*> x a
-  Ask f   <*> Stop x  = Ask $ \a -> f a <*> Stop x
-  Ask f   <*> Delay x = Ask $ \a -> f a <*> Delay x
-  Ask f   <*> Ask x   = Ask $ \a -> f a <*> x a
-
-instance Monad (Machine a) where
-  return = pure
-  Stop m  >>= f = f m
-  Delay m >>= f = Delay (m >>= f)
-  Ask m   >>= f = Ask $ \a -> m a >>= f
+  deriving Functor
 
 step :: Machine a b -> a -> Machine a b
 step m x = case m of
@@ -79,12 +59,12 @@ data Reason a
   | BothFailed  (Reason a) (Reason a)
   | LeftFailed  (Reason a)
   | RightFailed (Reason a)
-  deriving (Generic, Show)
+  deriving Show
 
 data Result a
   = Failure (Reason a)
   | Success
-  deriving (Generic, Show)
+  deriving Show
 
 type LTL a = Machine a (Result a)
 
