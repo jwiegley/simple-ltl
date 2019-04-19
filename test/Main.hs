@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Main where
 
 import LTL
@@ -10,7 +12,9 @@ main :: IO ()
 main = defaultMain $ testGroup "LTL tests"
   [ testCase "string match" $ do
       let formula = always (test odd `or` (test even `and` next (test odd)))
-      case run formula (take 10000000 ([1..] :: [Int])) of
-          Stop (Failure e) -> assertFailure $ "Failed: " ++ show e
-          _ -> return ()
+      runMachine (run formula (take 10000000 ([1..] :: [Int])))
+          (\case Failure e -> assertFailure $ "Failed: " ++ show e
+                 _ -> return ())
+          (const (return ()))
+          (const (return ()))
   ]

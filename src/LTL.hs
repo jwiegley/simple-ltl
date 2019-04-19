@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RankNTypes #-}
 
 -- | This formulation of LTL is in positive normal form by construction, and
 --   trivially dualizable. This choice was driven by the following Coq
@@ -40,17 +41,34 @@ module LTL
 import Data.List (foldl')
 import Prelude hiding (and, or, until)
 
-data Machine a b
-  = Stop b
-  | Delay (Machine a b)
-  | Ask (a -> Machine a b)
-  deriving Functor
+newtype Machine a b = Machine
+  { runMachine :: forall r. (b -> r) ->
+                      (Machine a b -> r) ->
+                      ((a -> Machine a b) -> r) ->
+                      r }
+
+instance Functor (Machine a) where
+  fmap f (Machine k) = Machine $ \s d a ->
+    k (s . f) (d . fmap f) (\g -> a (fmap f . g))
+  {-# INLINE fmap #-}
 
 step :: Machine a b -> a -> Machine a b
-step m@(Stop _) _ = m
-step (Delay m) _  = m
-step (Ask f) x    = step (f x) x
+step (Machine k) x = Machine $ \s d a ->
+  k s (\(Machine m) -> m s d a)
+      (\g -> runMachine (step (g x) x) s d a)
 {-# INLINE step #-}
+
+stop :: b -> Machine a b
+stop b = Machine $ \s _ _ -> s b
+{-# INLINE stop #-}
+
+delay :: Machine a b -> Machine a b
+delay m = Machine $ \_ d _ -> d m
+{-# INLINE delay #-}
+
+ask :: (a -> Machine a b) -> Machine a b
+ask f = Machine $ \_ _ a -> a f
+{-# INLINE ask #-}
 
 run :: Machine a b -> [a] -> Machine a b
 run = foldl' step
@@ -72,26 +90,38 @@ data Result a
 type LTL a = Machine a (Result a)
 
 combine :: LTL a -> LTL a -> LTL a
-combine (Stop (Failure e)) _  = Stop (Failure (LeftFailed e))
-combine _ (Stop (Failure e))  = Stop (Failure (RightFailed e))
-combine (Delay f') (Delay g') = Delay (combine f' g')
-combine (Ask f') (Ask g')     = Ask (\a -> combine (f' a) (g' a))
-combine f (Ask g')            = Ask (\a -> combine f (g' a))
-combine (Ask f') g            = Ask (\a -> combine (f' a) g)
-combine f' (Stop Success)     = f'
-combine (Stop Success) g'     = g'
+combine (Machine f) (Machine g) = Machine $ \s d a ->
+  f (\case Failure e -> s (Failure (LeftFailed e))
+           Success   ->
+             g (\case Failure e -> s (Failure (RightFailed e))
+                      Success   -> s Success)
+               d
+               a)
+    (\f' -> g (\case Failure e -> s (Failure (RightFailed e))
+                     Success   -> d f')
+             (\g' -> runMachine (combine f' g') s d a)
+             (\h  -> a $ \x -> combine (delay f') (h x)))
+    (\k  -> g (\case Failure e -> s (Failure (RightFailed e))
+                     Success   -> a k)
+             (\g' -> a $ \x -> combine (k x) (delay g'))
+    (\h -> a $ \x -> combine (k x) (h x)))
 
 select :: LTL a -> LTL a -> LTL a
-select (Stop (Failure e1))
-       (Stop (Failure e2))   = Stop (Failure (BothFailed e1 e2))
-select (Stop Success) _      = Stop Success
-select _ (Stop Success)      = Stop Success
-select (Delay f') (Delay g') = Delay (select f' g')
-select (Ask f') (Ask g')     = Ask (\a -> select (f' a) (g' a))
-select f (Ask g')            = Ask (\a -> select f (g' a))
-select (Ask f') g            = Ask (\a -> select (f' a) g)
-select (Stop (Failure _)) g' = g'
-select f' (Stop (Failure _)) = f'
+select (Machine f) (Machine g) = Machine $ \s d a ->
+  f (\case Success    -> s Success
+           Failure e1 ->
+             g (\case Failure e2 -> s (Failure (BothFailed e1 e2))
+                      Success    -> s Success)
+               d
+               a)
+    (\f' -> g (\case Failure _ -> d f'
+                     Success   -> s Success)
+             (\g' -> runMachine (select f' g') s d a)
+             (\h  -> a $ \x -> select (delay f') (h x)))
+    (\k  -> g (\case Failure _ -> a k
+                     Success   -> s Success)
+             (\g' -> a $ \x -> select (k x) (delay g'))
+    (\h -> a $ \x -> select (k x) (h x)))
 
 neg :: LTL a -> LTL a
 neg = fmap $ \case
@@ -100,19 +130,19 @@ neg = fmap $ \case
 {-# INLINE neg #-}
 
 top :: LTL a
-top = Stop Success
+top = stop Success
 {-# INLINE top #-}
 
 bottom :: String -> LTL a
-bottom e = Stop (Failure (HitBottom e))
+bottom e = stop (Failure (HitBottom e))
 {-# INLINE bottom #-}
 
 accept :: (a -> LTL a) -> LTL a
-accept = Ask
+accept = ask
 {-# INLINE accept #-}
 
 reject :: (a -> LTL a) -> LTL a
-reject f = Ask (neg . f)
+reject f = ask $ neg . f
 {-# INLINE reject #-}
 
 and :: LTL a -> LTL a -> LTL a
@@ -124,7 +154,7 @@ or !p = select p
 {-# INLINE or #-}
 
 next :: LTL a -> LTL a
-next = Delay
+next = delay
 {-# INLINE next #-}
 
 until :: LTL a -> LTL a -> LTL a
@@ -134,18 +164,10 @@ until p q = go
   {-# INLINE go #-}
 {-# INLINE until #-}
 
-weakUntil :: LTL a -> LTL a -> LTL a
-weakUntil p q = (p `until` q) `and` always p
-{-# INLINE weakUntil #-}
-
-strongRelease :: LTL a -> LTL a -> LTL a
-strongRelease p q = q `until` (p `or` q)
-{-# INLINE strongRelease #-}
-
 release :: LTL a -> LTL a -> LTL a
 release p q = go
   where
-  go = q `and` (p `or` (next go))
+  go = and q (or p (next go))
   {-# INLINE go #-}
 {-# INLINE release #-}
 
@@ -165,10 +187,18 @@ truth :: Bool -> LTL a
 truth b = if b then top else bottom "truth"
 {-# INLINE truth #-}
 
-test :: (a -> Bool) -> LTL a
-test f = accept $ truth . f
-{-# INLINE test #-}
-
 eq :: Eq a => a -> LTL a
 eq n = accept $ truth . (== n)
 {-# INLINE eq #-}
+
+weakUntil :: LTL a -> LTL a -> LTL a
+weakUntil p q = (p `until` q) `and` always p
+{-# INLINE weakUntil #-}
+
+strongRelease :: LTL a -> LTL a -> LTL a
+strongRelease p q = q `until` (p `or` q)
+{-# INLINE strongRelease #-}
+
+test :: (a -> Bool) -> LTL a
+test f = accept $ truth . f
+{-# INLINE test #-}
