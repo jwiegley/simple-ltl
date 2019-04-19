@@ -20,19 +20,19 @@ import           Text.Regex.PCRE.Heavy
 --   in  Gen.list listLength Gen.enumBounded
 
 match :: Regex -> LTL String
-match regex = Accept $ \input -> truth (input =~ regex)
+match regex = accept $ \input -> truth (input =~ regex)
 
 match' :: Regex -> (String -> LTL String) -> LTL String
-match' regex k = Accept $ \input ->
+match' regex k = accept $ \input ->
   case scan regex input of
     (_, x : _xs) : _ -> k x
-    _ -> Bottom "match"
+    _ -> bottom "match"
 
 whenMatch :: Regex -> (String -> LTL String) -> LTL String
-whenMatch regex k = Accept $ \input ->
+whenMatch regex k = accept $ \input ->
   case scan regex input of
     (_, x : _xs) : _ -> k x
-    _ -> Top
+    _ -> top
 
 compiled :: ByteString -> Regex
 compiled regex =
@@ -40,7 +40,7 @@ compiled regex =
     $ compileM regex []
 
 test :: Machine Int (Result Int)
-test = run (compile (implies (eq 2) (eventually (eq 4))))
+test = run (implies (eq 2) (eventually (eq 4)))
            [1, 2, 3, 4]
 
 main :: IO ()
@@ -53,8 +53,7 @@ main = defaultMain $ testGroup "LTL tests"
                         (whenMatch [re|bar ([0-9]+)|] $ \n' ->
                          truth (read n' < (100 :: Int)))))
 
-      case run (compile formula)
-          (Prelude.concat (Prelude.replicate 5000
+      case run formula (Prelude.concat (Prelude.replicate 5000
         [ "foo 10"
         , "foo 20"
         , "foo 30"

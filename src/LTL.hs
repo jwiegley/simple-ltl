@@ -9,7 +9,8 @@
 --   https://github.com/jwiegley/constructive-ltl/blob/master/src/LTL.v#L69
 
 module LTL
-  ( Machine(..)
+  ( LTL
+  , Machine(..)
   , Reason(..)
   , Result(..)
   , step
@@ -94,62 +95,69 @@ neg :: LTL a -> LTL a
 neg = fmap $ \case
   Success   -> Failure (HitBottom "neg")
   Failure _ -> Success
+{-# INLINABLE neg #-}
 
 top :: LTL a
 top = Stop Success
-{-# INLINE top #-}
+{-# INLINABLE top #-}
 
 bottom :: String -> LTL a
 bottom e = Stop (Failure (HitBottom e))
-{-# INLINE bottom #-}
+{-# INLINABLE bottom #-}
 
 accept :: (a -> LTL a) -> LTL a
 accept = Ask
-{-# INLINE accept #-}
+{-# INLINABLE accept #-}
 
 reject :: (a -> LTL a) -> LTL a
 reject = neg . Ask
-{-# INLINE reject #-}
+{-# INLINABLE reject #-}
 
 and :: LTL a -> LTL a -> LTL a
 and = combine
-{-# INLINE and #-}
+{-# INLINABLE and #-}
 
 or :: LTL a -> LTL a -> LTL a
 or = select
-{-# INLINE or #-}
+{-# INLINABLE or #-}
 
 next :: LTL a -> LTL a
 next = Delay
-{-# INLINE next #-}
+{-# INLINABLE next #-}
 
 until :: LTL a -> LTL a -> LTL a
 until p q = or q (and p (next (until p q)))
-{-# INLINE until #-}
+{-# INLINABLE until #-}
 
 release :: LTL a -> LTL a -> LTL a
 release p q = and q (or p (next (release p q)))
-{-# INLINE release #-}
+{-# INLINABLE release #-}
 
 implies :: LTL a -> LTL a -> LTL a
 implies p = or (neg p)
-{-# INLINE implies #-}
+{-# INLINABLE implies #-}
 
 eventually :: LTL a -> LTL a
 eventually = until top
-{-# INLINE eventually #-}
+{-# INLINABLE eventually #-}
 
 always :: LTL a -> LTL a
 always = release (bottom "always")
-{-# INLINE always #-}
+{-# INLINABLE always #-}
 
 truth :: Bool -> LTL a
 truth b = if b then top else bottom "truth"
-{-# INLINE truth #-}
+{-# INLINABLE truth #-}
 
 eq :: Eq a => a -> LTL a
 eq n = accept $ truth . (== n)
-{-# INLINE eq #-}
+{-# INLINABLE eq #-}
 
-test :: Machine Int (Result Int)
-test = run (always (implies (eq 2) (bottom "here"))) [1,2,3,4]
+test :: String
+test = case go of
+  Stop b  -> show b
+  Delay _ -> "Delay"
+  Ask _   -> "Ask"
+ where
+  xs = [1,2,3,4] :: [Int]
+  go = run (always (implies (eq 2) (bottom "here"))) xs
