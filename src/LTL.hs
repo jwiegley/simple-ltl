@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE LambdaCase #-}
 
@@ -81,6 +80,12 @@ combine (Ask f') g            = Ask (\a -> combine (f' a) g)
 combine f' (Stop Success)     = f'
 combine (Stop Success) g'     = g'
 
+combineDelay :: LTL a -> LTL a -> LTL a
+combineDelay (Stop (Failure e)) _ = Stop (Failure (LeftFailed e))
+combineDelay (Delay f') g         = Delay (combine f' g)
+combineDelay (Ask f') g           = Ask (\a -> combineDelay (f' a) g)
+combineDelay (Stop Success) g     = Delay g
+
 select :: LTL a -> LTL a -> LTL a
 select (Stop (Failure e1))
        (Stop (Failure e2))   = Stop (Failure (BothFailed e1 e2))
@@ -92,6 +97,12 @@ select f (Ask g')            = Ask (\a -> select f (g' a))
 select (Ask f') g            = Ask (\a -> select (f' a) g)
 select (Stop (Failure _)) g' = g'
 select f' (Stop (Failure _)) = f'
+
+selectDelay :: LTL a -> LTL a -> LTL a
+selectDelay (Stop Success) _     = Stop Success
+selectDelay (Delay f') g         = Delay (select f' g)
+selectDelay (Ask f') g           = Ask (\a -> selectDelay (f' a) g)
+selectDelay (Stop (Failure _)) g = Delay g
 
 neg :: LTL a -> LTL a
 neg = fmap $ \case
@@ -116,11 +127,11 @@ reject f = Ask (neg . f)
 {-# INLINE reject #-}
 
 and :: LTL a -> LTL a -> LTL a
-and !p !q = combine p q
+and = combine
 {-# INLINE and #-}
 
 or :: LTL a -> LTL a -> LTL a
-or !p = select p
+or = select
 {-# INLINE or #-}
 
 next :: LTL a -> LTL a
@@ -130,7 +141,7 @@ next = Delay
 until :: LTL a -> LTL a -> LTL a
 until p q = go
   where
-  go = or q (and p (next go))
+  go = q `or` combineDelay p go
   {-# INLINE go #-}
 {-# INLINE until #-}
 
@@ -145,7 +156,7 @@ strongRelease p q = q `until` (p `or` q)
 release :: LTL a -> LTL a -> LTL a
 release p q = go
   where
-  go = q `and` (p `or` (next go))
+  go = q `and` selectDelay p go
   {-# INLINE go #-}
 {-# INLINE release #-}
 
