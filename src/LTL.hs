@@ -31,8 +31,6 @@ module LTL
   , always
   , truth
   , eq
-
-  , test
   ) where
 
 import Prelude hiding (and, or, until)
@@ -112,7 +110,7 @@ accept = Ask
 {-# INLINE accept #-}
 
 reject :: (a -> LTL a) -> LTL a
-reject = neg . Ask
+reject f = Ask (neg . f)
 {-# INLINE reject #-}
 
 and :: LTL a -> LTL a -> LTL a
@@ -160,12 +158,3 @@ truth b = if b then top else bottom "truth"
 eq :: Eq a => a -> LTL a
 eq n = accept $ truth . (== n)
 {-# INLINE eq #-}
-
-test :: String
-test = case go of
-  Stop b  -> show b
-  Delay _ -> "Delay"
-  Ask _   -> "Ask"
- where
-  xs = [1,2,3,4] :: [Int]
-  go = run (always (implies (eq 2) (bottom "here"))) xs

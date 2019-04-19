@@ -5,19 +5,10 @@ module Main where
 
 import           Data.ByteString hiding (pack)
 import           Data.ByteString.Char8 (pack)
--- import           Hedgehog
--- import qualified Hedgehog.Gen as Gen
--- import qualified Hedgehog.Range as Range
 import           LTL
 import           Test.Tasty
 import           Test.Tasty.HUnit
 import           Text.Regex.PCRE.Heavy
--- import           Test.Tasty.Hedgehog
-
--- genIntList :: Gen [Int]
--- genIntList =
---   let listLength = Range.linear 0 10
---   in  Gen.list listLength Gen.enumBounded
 
 match :: Regex -> LTL String
 match regex = accept $ \input -> truth (input =~ regex)
@@ -33,9 +24,14 @@ compiled regex =
   either (error $ "regexp failed to compile: " ++ show regex) id
     $ compileM regex []
 
-test :: Machine Int (Result Int)
-test = run (implies (eq 2) (eventually (eq 4)))
-           [1, 2, 3, 4]
+test :: String
+test = case go of
+  Stop b  -> show b
+  Delay _ -> "Delay"
+  Ask _   -> "Ask"
+ where
+  xs = [1,2,3,4] :: [Int]
+  go = run (always (implies (eq 2) (bottom "here"))) xs
 
 main :: IO ()
 main = defaultMain $ testGroup "LTL tests"
