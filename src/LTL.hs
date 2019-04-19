@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE LambdaCase #-}
 
@@ -25,14 +26,18 @@ module LTL
   , LTL.or
   , next
   , LTL.until
+  , weakUntil
   , release
+  , strongRelease
   , implies
   , eventually
   , always
   , truth
+  , test
   , eq
   ) where
 
+import Data.List (foldl')
 import Prelude hiding (and, or, until)
 
 data Machine a b
@@ -42,16 +47,13 @@ data Machine a b
   deriving Functor
 
 step :: Machine a b -> a -> Machine a b
-step m x = case m of
-  Stop r  -> Stop r
-  Delay n -> n
-  Ask f   -> step (f x) x
+step m@(Stop _) _ = m
+step (Delay m) _  = m
+step (Ask f) x    = step (f x) x
 {-# INLINE step #-}
 
 run :: Machine a b -> [a] -> Machine a b
-run m = \case
-  []     -> m
-  x : xs -> run (step m x) xs
+run = foldl' step
 {-# INLINE run #-}
 
 data Reason a
@@ -114,11 +116,11 @@ reject f = Ask (neg . f)
 {-# INLINE reject #-}
 
 and :: LTL a -> LTL a -> LTL a
-and = combine
+and !p !q = combine p q
 {-# INLINE and #-}
 
 or :: LTL a -> LTL a -> LTL a
-or = select
+or !p = select p
 {-# INLINE or #-}
 
 next :: LTL a -> LTL a
@@ -132,10 +134,18 @@ until p q = go
   {-# INLINE go #-}
 {-# INLINE until #-}
 
+weakUntil :: LTL a -> LTL a -> LTL a
+weakUntil p q = (p `until` q) `and` always p
+{-# INLINE weakUntil #-}
+
+strongRelease :: LTL a -> LTL a -> LTL a
+strongRelease p q = q `until` (p `or` q)
+{-# INLINE strongRelease #-}
+
 release :: LTL a -> LTL a -> LTL a
 release p q = go
   where
-  go = and q (or p (next go))
+  go = q `and` (p `or` (next go))
   {-# INLINE go #-}
 {-# INLINE release #-}
 
@@ -154,6 +164,10 @@ always = release (bottom "always")
 truth :: Bool -> LTL a
 truth b = if b then top else bottom "truth"
 {-# INLINE truth #-}
+
+test :: (a -> Bool) -> LTL a
+test f = accept $ truth . f
+{-# INLINE test #-}
 
 eq :: Eq a => a -> LTL a
 eq n = accept $ truth . (== n)
