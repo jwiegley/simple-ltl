@@ -22,12 +22,6 @@ import           Text.Regex.PCRE.Heavy
 match :: Regex -> LTL String
 match regex = accept $ \input -> truth (input =~ regex)
 
-match' :: Regex -> (String -> LTL String) -> LTL String
-match' regex k = accept $ \input ->
-  case scan regex input of
-    (_, x : _xs) : _ -> k x
-    _ -> bottom "match"
-
 whenMatch :: Regex -> (String -> LTL String) -> LTL String
 whenMatch regex k = accept $ \input ->
   case scan regex input of
@@ -53,7 +47,7 @@ main = defaultMain $ testGroup "LTL tests"
                         (whenMatch [re|bar ([0-9]+)|] $ \n' ->
                          truth (read n' < (100 :: Int)))))
 
-      case run formula (Prelude.concat (Prelude.replicate 5000
+      case run formula (Prelude.concat (Prelude.replicate 50000
         [ "foo 10"
         , "foo 20"
         , "foo 30"

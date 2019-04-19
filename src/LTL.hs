@@ -48,11 +48,13 @@ step m x = case m of
   Stop r  -> Stop r
   Delay n -> n
   Ask f   -> step (f x) x
+{-# INLINE step #-}
 
 run :: Machine a b -> [a] -> Machine a b
 run m = \case
   []     -> m
   x : xs -> run (step m x) xs
+{-# INLINE run #-}
 
 data Reason a
   = HitBottom   String
@@ -95,63 +97,69 @@ neg :: LTL a -> LTL a
 neg = fmap $ \case
   Success   -> Failure (HitBottom "neg")
   Failure _ -> Success
-{-# INLINABLE neg #-}
+{-# INLINE neg #-}
 
 top :: LTL a
 top = Stop Success
-{-# INLINABLE top #-}
+{-# INLINE top #-}
 
 bottom :: String -> LTL a
 bottom e = Stop (Failure (HitBottom e))
-{-# INLINABLE bottom #-}
+{-# INLINE bottom #-}
 
 accept :: (a -> LTL a) -> LTL a
 accept = Ask
-{-# INLINABLE accept #-}
+{-# INLINE accept #-}
 
 reject :: (a -> LTL a) -> LTL a
 reject = neg . Ask
-{-# INLINABLE reject #-}
+{-# INLINE reject #-}
 
 and :: LTL a -> LTL a -> LTL a
 and = combine
-{-# INLINABLE and #-}
+{-# INLINE and #-}
 
 or :: LTL a -> LTL a -> LTL a
 or = select
-{-# INLINABLE or #-}
+{-# INLINE or #-}
 
 next :: LTL a -> LTL a
 next = Delay
-{-# INLINABLE next #-}
+{-# INLINE next #-}
 
 until :: LTL a -> LTL a -> LTL a
-until p q = or q (and p (next (until p q)))
-{-# INLINABLE until #-}
+until p q = go
+  where
+  go = or q (and p (next go))
+  {-# INLINE go #-}
+{-# INLINE until #-}
 
 release :: LTL a -> LTL a -> LTL a
-release p q = and q (or p (next (release p q)))
-{-# INLINABLE release #-}
+release p q = go
+  where
+  go = and q (or p (next go))
+  {-# INLINE go #-}
+{-# INLINE release #-}
 
 implies :: LTL a -> LTL a -> LTL a
 implies p = or (neg p)
-{-# INLINABLE implies #-}
+{-# INLINE implies #-}
 
 eventually :: LTL a -> LTL a
 eventually = until top
-{-# INLINABLE eventually #-}
+{-# INLINE eventually #-}
 
 always :: LTL a -> LTL a
 always = release (bottom "always")
-{-# INLINABLE always #-}
+{-# INLINE always #-}
 
 truth :: Bool -> LTL a
 truth b = if b then top else bottom "truth"
-{-# INLINABLE truth #-}
+{-# INLINE truth #-}
 
 eq :: Eq a => a -> LTL a
 eq n = accept $ truth . (== n)
-{-# INLINABLE eq #-}
+{-# INLINE eq #-}
 
 test :: String
 test = case go of
