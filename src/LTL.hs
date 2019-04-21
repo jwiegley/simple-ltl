@@ -1,4 +1,6 @@
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 
 -- | This formulation of LTL is in positive normal form by construction, and
@@ -36,7 +38,10 @@ module LTL
   , eq
   ) where
 
+import Control.DeepSeq
+import Data.Function (fix)
 import Data.List (foldl')
+import GHC.Generics
 import Prelude hiding (and, or, until)
 
 data Machine a b
@@ -61,48 +66,65 @@ data Reason a
   | BothFailed  (Reason a) (Reason a)
   | LeftFailed  (Reason a)
   | RightFailed (Reason a)
-  deriving Show
+  deriving (Show, Generic, NFData)
 
 data Result a
   = Failure (Reason a)
   | Success
-  deriving Show
+  deriving (Show, Generic, NFData)
 
 type LTL a = Machine a (Result a)
 
 combine :: LTL a -> LTL a -> LTL a
-combine (Stop (Failure e)) _  = Stop (Failure (LeftFailed e))
-combine _ (Stop (Failure e))  = Stop (Failure (RightFailed e))
-combine (Delay f') (Delay g') = Delay (combine f' g')
-combine (Ask f') (Ask g')     = Ask (\a -> combine (f' a) (g' a))
-combine f (Ask g')            = Ask (\a -> combine f (g' a))
-combine (Ask f') g            = Ask (\a -> combine (f' a) g)
-combine f' (Stop Success)     = f'
-combine (Stop Success) g'     = g'
+combine (Stop x) g = case x of
+  Failure e -> Stop (Failure (LeftFailed e))
+  Success   -> g
+
+combine f@(Delay f') g = case g of
+  Stop (Failure e) -> Stop (Failure (RightFailed e))
+  Stop Success     -> f
+  Delay g'         -> Delay (combine f' g')
+  Ask g'           -> Ask (combine f . g')
+
+combine f@(Ask f') g = case g of
+  Stop (Failure e) -> Stop (Failure (RightFailed e))
+  Stop Success     -> f
+  Ask g'           -> Ask $ \a -> combine (f' a) (g' a)
+  Delay _          -> Ask $ \a -> combine (f' a) g
 
 combineDelay :: LTL a -> LTL a -> LTL a
 combineDelay (Stop (Failure e)) _ = Stop (Failure (LeftFailed e))
 combineDelay (Delay f') g         = Delay (combine f' g)
 combineDelay (Ask f') g           = Ask (\a -> combineDelay (f' a) g)
 combineDelay (Stop Success) g     = Delay g
+{-# INLINE combineDelay #-}
 
 select :: LTL a -> LTL a -> LTL a
-select (Stop (Failure e1))
-       (Stop (Failure e2))   = Stop (Failure (BothFailed e1 e2))
-select (Stop Success) _      = Stop Success
-select _ (Stop Success)      = Stop Success
-select (Delay f') (Delay g') = Delay (select f' g')
-select (Ask f') (Ask g')     = Ask (\a -> select (f' a) (g' a))
-select f (Ask g')            = Ask (\a -> select f (g' a))
-select (Ask f') g            = Ask (\a -> select (f' a) g)
-select (Stop (Failure _)) g' = g'
-select f' (Stop (Failure _)) = f'
+select (Stop x) g = case x of
+  Success      -> Stop Success
+  Failure e1   -> case g of
+    Stop Success      -> Stop Success
+    Stop (Failure e2) -> Stop (Failure (BothFailed e1 e2))
+    _                 -> g
+
+select f@(Delay f') g = case g of
+  Stop Success     -> Stop Success
+  Stop (Failure _) -> f
+  Delay g'         -> Delay (select f' g')
+  Ask g'           -> Ask (\a -> select f (g' a))
+
+select f@(Ask f') g = case g of
+  Stop Success     -> Stop Success
+  Stop (Failure _) -> f
+  Ask g'           -> Ask (\a -> select (f' a) (g' a))
+  Delay _          -> Ask (\a -> select (f' a) g)
 
 selectDelay :: LTL a -> LTL a -> LTL a
 selectDelay (Stop Success) _     = Stop Success
 selectDelay (Delay f') g         = Delay (select f' g)
 selectDelay (Ask f') g           = Ask (\a -> selectDelay (f' a) g)
 selectDelay (Stop (Failure _)) g = Delay g
+{-# INLINE selectDelay #-}
 
 neg :: LTL a -> LTL a
 neg = fmap $ \case
@@ -139,26 +161,20 @@ next = Delay
 {-# INLINE next #-}
 
 until :: LTL a -> LTL a -> LTL a
-until p q = go
-  where
-  go = q `or` combineDelay p go
-  {-# INLINE go #-}
+until p q = fix $ or q . combineDelay p
 {-# INLINE until #-}
 
 weakUntil :: LTL a -> LTL a -> LTL a
-weakUntil p q = (p `until` q) `and` always p
+weakUntil p q = (p `until` q) `or` always p
 {-# INLINE weakUntil #-}
 
-strongRelease :: LTL a -> LTL a -> LTL a
-strongRelease p q = q `until` (p `or` q)
-{-# INLINE strongRelease #-}
-
 release :: LTL a -> LTL a -> LTL a
-release p q = go
-  where
-  go = q `and` selectDelay p go
-  {-# INLINE go #-}
+release p q = fix $ and q . selectDelay p
 {-# INLINE release #-}
+
+strongRelease :: LTL a -> LTL a -> LTL a
+strongRelease p q = (p `release` q) `and` eventually p
+{-# INLINE strongRelease #-}
 
 implies :: LTL a -> LTL a -> LTL a
 implies p = or (neg p)
@@ -181,5 +197,5 @@ test f = accept $ truth . f
 {-# INLINE test #-}
 
 eq :: Eq a => a -> LTL a
-eq n = accept $ truth . (== n)
+eq = test . (==)
 {-# INLINE eq #-}
