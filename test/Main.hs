@@ -11,6 +11,6 @@ main = defaultMain $ testGroup "LTL tests"
   [ testCase "string match" $ do
       let formula = always (test odd `or` (test even `and` next (test odd)))
       case run formula (take 100000000 ([1..] :: [Int])) of
-          Stop (Failure e) -> assertFailure $ "Failed: " ++ show e
+          Right (Failure e) -> assertFailure $ "Failed: " ++ show e
           _ -> return ()
   ]

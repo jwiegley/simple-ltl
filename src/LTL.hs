@@ -8,8 +8,8 @@ module LTL
   , Machine(..)
   , Reason(..)
   , Result(..)
-  , step
   , run
+  , showResult
 
   , neg
   , top
@@ -28,7 +28,11 @@ module LTL
   , always
   , truth
   , test
+  , is
   , eq
+
+  , All(..)
+  , Any(..)
   ) where
 
 import Control.DeepSeq
@@ -37,20 +41,13 @@ import Data.List (foldl')
 import GHC.Generics
 import Prelude hiding (and, or, until)
 
-data Machine a b
-  = Stop b
-  | Delay (Machine a b)
-  | Ask (a -> Machine a b)
-  deriving Functor
+newtype Machine a b = Machine { step :: a -> Either (Machine a b) b }
 
-step :: Machine a b -> a -> Machine a b
-step m@(Stop _) _ = m
-step (Delay m) _  = m
-step (Ask f) x    = step (f x) x
-{-# INLINE step #-}
+instance Functor (Machine a) where
+  fmap f (Machine k) = Machine $ either (Left . fmap f) (Right . f) . k
 
-run :: Machine a b -> [a] -> Machine a b
-run = foldl' step
+run :: Machine a b -> [a] -> Either (Machine a b) b
+run = foldl' (either step (const . Right)) . Left
 {-# INLINE run #-}
 
 data Reason a
@@ -69,76 +66,60 @@ data Result a
 type LTL a = Machine a (Result a)
 
 combine :: LTL a -> LTL a -> LTL a
-combine (Stop x) g = case x of
-  Failure e -> Stop (Failure (LeftFailed e))
-  Success   -> g
-
-combine f@(Delay f') g = case g of
-  Stop (Failure e) -> Stop (Failure (RightFailed e))
-  Stop Success     -> f
-  Delay g'         -> Delay (combine f' g')
-  Ask g'           -> Ask (combine f . g')
-
-combine f@(Ask f') g = case g of
-  Stop (Failure e) -> Stop (Failure (RightFailed e))
-  Stop Success     -> f
-  Ask g'           -> Ask $ \a -> combine (f' a) (g' a)
-  Delay _          -> Ask $ \a -> combine (f' a) g
-
-combineDelay :: LTL a -> LTL a -> LTL a
-combineDelay (Stop (Failure e)) _ = Stop (Failure (LeftFailed e))
-combineDelay (Delay f') g         = Delay (combine f' g)
-combineDelay (Ask f') g           = Ask (\a -> combineDelay (f' a) g)
-combineDelay (Stop Success) g     = Delay g
-{-# INLINE combineDelay #-}
+combine (Machine f) g = Machine $ \a ->
+  case f a of
+    Right (Failure e) -> Right (Failure (LeftFailed e))
+    Right Success     -> step g a
+    Left f'           -> case step g a of
+      Right (Failure e) -> Right (Failure (RightFailed e))
+      Right Success     -> Left f'
+      Left g'           -> Left $! combine f' g'
 
 select :: LTL a -> LTL a -> LTL a
-select (Stop x) g = case x of
-  Success      -> Stop Success
-  Failure e1   -> case g of
-    Stop Success      -> Stop Success
-    Stop (Failure e2) -> Stop (Failure (BothFailed e1 e2))
-    _                 -> g
+select (Machine f) g = Machine $ \a ->
+  case f a of
+    Right Success      -> Right Success
+    Right (Failure e1) -> case step g a of
+      Right (Failure e2) -> Right (Failure (BothFailed e1 e2))
+      g'                 -> g'
+    Left f' -> case step g a of
+      Right Success     -> Right Success
+      Right (Failure _) -> Left f'
+      Left g'           -> Left $! select f' g'
 
-select f@(Delay f') g = case g of
-  Stop Success     -> Stop Success
-  Stop (Failure _) -> f
-  Delay g'         -> Delay (select f' g')
-  Ask g'           -> Ask (\a -> select f (g' a))
+showResult :: Show a => Either (LTL a) (Result a) -> String
+showResult (Left _)  = "<need input>"
+showResult (Right b) = show b
+{-# INLINE showResult #-}
 
-select f@(Ask f') g = case g of
-  Stop Success     -> Stop Success
-  Stop (Failure _) -> f
-  Ask g'           -> Ask (\a -> select (f' a) (g' a))
-  Delay _          -> Ask (\a -> select (f' a) g)
-
-selectDelay :: LTL a -> LTL a -> LTL a
-selectDelay (Stop Success) _     = Stop Success
-selectDelay (Delay f') g         = Delay (select f' g)
-selectDelay (Ask f') g           = Ask (\a -> selectDelay (f' a) g)
-selectDelay (Stop (Failure _)) g = Delay g
-{-# INLINE selectDelay #-}
-
-neg :: LTL a -> LTL a
-neg = fmap $ \case
+invert :: Result a -> Result a
+invert = \case
   Success   -> Failure (HitBottom "neg")
   Failure _ -> Success
+{-# INLINE invert #-}
+
+neg :: LTL a -> LTL a
+neg = fmap invert
 {-# INLINE neg #-}
 
+stop :: Result a -> LTL a
+stop = Machine . const . Right
+{-# INLINE stop #-}
+
 top :: LTL a
-top = Stop Success
+top = stop Success
 {-# INLINE top #-}
 
 bottom :: String -> LTL a
-bottom e = Stop (Failure (HitBottom e))
+bottom = stop . Failure . HitBottom
 {-# INLINE bottom #-}
 
 accept :: (a -> LTL a) -> LTL a
-accept = Ask
+accept f = Machine $ \a -> step (f a) a
 {-# INLINE accept #-}
 
 reject :: (a -> LTL a) -> LTL a
-reject f = Ask (neg . f)
+reject = neg . accept
 {-# INLINE reject #-}
 
 and :: LTL a -> LTL a -> LTL a
@@ -150,11 +131,11 @@ or = select
 {-# INLINE or #-}
 
 next :: LTL a -> LTL a
-next = Delay
+next = Machine . const . Left
 {-# INLINE next #-}
 
 until :: LTL a -> LTL a -> LTL a
-until p q = fix $ or q . combineDelay p
+until p q = fix $ or q . combine p . next
 {-# INLINE until #-}
 
 weakUntil :: LTL a -> LTL a -> LTL a
@@ -162,7 +143,7 @@ weakUntil p q = (p `until` q) `or` always p
 {-# INLINE weakUntil #-}
 
 release :: LTL a -> LTL a -> LTL a
-release p q = fix $ and q . selectDelay p
+release p q = fix $ and q . select p . next
 {-# INLINE release #-}
 
 strongRelease :: LTL a -> LTL a -> LTL a
@@ -170,7 +151,7 @@ strongRelease p q = (p `release` q) `and` eventually p
 {-# INLINE strongRelease #-}
 
 implies :: LTL a -> LTL a -> LTL a
-implies p = or (neg p)
+implies = or . neg
 {-# INLINE implies #-}
 
 eventually :: LTL a -> LTL a
@@ -182,13 +163,42 @@ always = release (bottom "always")
 {-# INLINE always #-}
 
 truth :: Bool -> LTL a
-truth b = if b then top else bottom "truth"
+truth True  = top
+truth False = bottom "truth"
 {-# INLINE truth #-}
 
+is :: (a -> Bool) -> LTL a
+is = accept . (truth .)
+{-# INLINE is #-}
+
 test :: (a -> Bool) -> LTL a
-test f = accept $ truth . f
+test = is
 {-# INLINE test #-}
 
 eq :: Eq a => a -> LTL a
-eq = test . (==)
+eq = is . (==)
 {-# INLINE eq #-}
+
+newtype All a = All { getAll :: LTL a }
+
+instance Semigroup (All a) where
+  All x <> All y = All (combine x y)
+  {-# INLINE (<>) #-}
+
+instance Monoid (All a) where
+  mempty = All top
+  {-# INLINE mempty #-}
+  mappend = (<>)
+  {-# INLINE mappend #-}
+
+newtype Any a = Any { getAny :: LTL a }
+
+instance Semigroup (Any a) where
+  Any x <> Any y = Any (select x y)
+  {-# INLINE (<>) #-}
+
+instance Monoid (Any a) where
+  mempty = Any (bottom "mempty")
+  {-# INLINE mempty #-}
+  mappend = (<>)
+  {-# INLINE mappend #-}

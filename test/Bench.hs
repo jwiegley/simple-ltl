@@ -5,15 +5,23 @@ import Criterion.Main
 import Data.List hiding (and, or)
 import Prelude hiding (and, or)
 
-formula :: LTL Int
-formula = always (test odd `or` (test even `and` next (test odd)))
+formula1 :: LTL Int
+formula1 = always (is odd `or` (is even `and` next (is odd)))
 
-runIt n = run formula (take n ([1..] :: [Int]))
+formula2 :: LTL Int
+formula2 = always (is odd `LTL.until` is even)
 
+runIt :: LTL Int -> Int -> Either (LTL Int) (Result Int)
+runIt f n = run f (take n ([1..] :: [Int]))
+
+grIt :: Int -> Bool
+grIt n = all (>0) (take n ([1..] :: [Int]))
+
+main :: IO ()
 main = defaultMain
-  [ bgroup "even/odd"
-      [ bench "100000"   $ whnf runIt 100000
-      , bench "1000000"  $ whnf runIt 1000000
-      , bench "10000000" $ whnf runIt 10000000
+  [ bgroup "just numbers"
+      [ bench "all (<0)"  $ whnf grIt 1000000
+      , bench "formula1"  $ whnf (runIt formula1) 1000000
+      , bench "formula2"  $ whnf (runIt formula2) 1000000
       ]
   ]
