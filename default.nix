@@ -25,6 +25,11 @@ pkgs.haskellPackages.developPackage {
   };
 
   modifier = drv: pkgs.haskell.lib.overrideCabal drv (attrs: {
+    benchmarkDepends = (attrs.buildToolDepends or []) ++ [
+      pkgs.haskellPackages.criterion
+    ];
+
+    doBenchmark = true;
   });
 
   inherit returnShellEnv;
