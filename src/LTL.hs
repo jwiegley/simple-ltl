@@ -3,13 +3,34 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 
+-- | This module provides a simple way of applying LTL formulas to lists, or
+--   streams of input, to determine if a given formula matches some or all of
+--   that input.
+--
+--   Formulas are written exactly as you would in LTL, but using names instead
+--   of the typical symbols, for example:
+--
+-- @
+-- always (is even @`until@` is odd)
+-- @
+--
+--   Use 'run' to apply a formula to a list of inputs, returning either 'Left'
+--   if it needs more input to determine the truth of the formula, or 'Right'
+--   if it could determine truth from some prefix of that input.
+--
+--   Use 'step' to advance a formula by a single input. The return value has
+--   the same meaning as 'run', but allows you to apply it in cases whether
+--   you don't necessarily have all the inputs at once, such as feeding input
+--   gradually within a conduit to check for logic failures.
+--
+--   For the meaning of almost all the functions in the module, see
+--   https://en.wikipedia.org/wiki/Linear_temporal_logic
 module LTL
   ( LTL
   , Machine(..)
   , Reason(..)
   , Result(..)
   , run
-  , showResult
 
   , neg
   , top
@@ -31,8 +52,7 @@ module LTL
   , is
   , eq
 
-  , All(..)
-  , Any(..)
+  , showResult
   ) where
 
 import Control.DeepSeq
@@ -70,7 +90,7 @@ combine (Machine f) g = Machine $ \a ->
   case f a of
     Right (Failure e) -> Right (Failure (LeftFailed e))
     Right Success     -> step g a
-    Left f'           -> case step g a of
+    Left f' -> case step g a of
       Right (Failure e) -> Right (Failure (RightFailed e))
       Right Success     -> Left f'
       Left g'           -> Left $! combine f' g'
@@ -87,17 +107,13 @@ select (Machine f) g = Machine $ \a ->
       Right (Failure _) -> Left f'
       Left g'           -> Left $! select f' g'
 
-showResult :: Show a => Either (LTL a) (Result a) -> String
-showResult (Left _)  = "<need input>"
-showResult (Right b) = show b
-{-# INLINE showResult #-}
-
 invert :: Result a -> Result a
 invert = \case
   Success   -> Failure (HitBottom "neg")
   Failure _ -> Success
 {-# INLINE invert #-}
 
+-- | Negate a formula: ¬ p
 neg :: LTL a -> LTL a
 neg = fmap invert
 {-# INLINE neg #-}
@@ -106,99 +122,100 @@ stop :: Result a -> LTL a
 stop = Machine . const . Right
 {-# INLINE stop #-}
 
+-- | ⊤, or "true"
 top :: LTL a
 top = stop Success
 {-# INLINE top #-}
 
+-- | ⊥, or "false"
 bottom :: String -> LTL a
 bottom = stop . Failure . HitBottom
 {-# INLINE bottom #-}
 
+-- | Given an input element, provide a formula to determine its truth. These
+--   can be nested, making it possible to have conditional formulas.
 accept :: (a -> LTL a) -> LTL a
 accept f = Machine $ \a -> step (f a) a
 {-# INLINE accept #-}
 
+-- | The opposite in meaning to 'accept', defined simply as 'neg . accept'.
 reject :: (a -> LTL a) -> LTL a
 reject = neg . accept
 {-# INLINE reject #-}
 
+-- | Boolean conjunction: ∧
 and :: LTL a -> LTL a -> LTL a
 and = combine
 {-# INLINE and #-}
 
+-- | Boolean disjunction: ∨
 or :: LTL a -> LTL a -> LTL a
 or = select
 {-# INLINE or #-}
 
+-- | The "next" temporal modality, typically written 'X p' or '◯ p'.
 next :: LTL a -> LTL a
 next = Machine . const . Left
 {-# INLINE next #-}
 
+-- | The "until" temporal modality, typically written 'p U q'.
 until :: LTL a -> LTL a -> LTL a
 until p q = fix $ or q . combine p . next
 {-# INLINE until #-}
 
+-- | Weak until.
 weakUntil :: LTL a -> LTL a -> LTL a
 weakUntil p q = (p `until` q) `or` always p
 {-# INLINE weakUntil #-}
 
+-- | Release, the dual of 'until'.
 release :: LTL a -> LTL a -> LTL a
 release p q = fix $ and q . select p . next
 {-# INLINE release #-}
 
+-- | Strong release.
 strongRelease :: LTL a -> LTL a -> LTL a
 strongRelease p q = (p `release` q) `and` eventually p
 {-# INLINE strongRelease #-}
 
+-- | Logical implication: p → q
 implies :: LTL a -> LTL a -> LTL a
 implies = or . neg
 {-# INLINE implies #-}
 
+-- | Eventually the formula will hold, typically written F p or ◇ p.
 eventually :: LTL a -> LTL a
 eventually = until top
 {-# INLINE eventually #-}
 
+-- | Always the formula must hold, typically written G p or □ p.
 always :: LTL a -> LTL a
 always = release (bottom "always")
 {-# INLINE always #-}
 
+-- | True if the given Haskell boolean is true.
 truth :: Bool -> LTL a
 truth True  = top
 truth False = bottom "truth"
 {-# INLINE truth #-}
 
+-- | True if the given predicate on the input is true.
 is :: (a -> Bool) -> LTL a
 is = accept . (truth .)
 {-# INLINE is #-}
 
+-- | Another name for 'is'.
 test :: (a -> Bool) -> LTL a
 test = is
 {-# INLINE test #-}
 
+-- | Check for equality with the input.
 eq :: Eq a => a -> LTL a
 eq = is . (==)
 {-# INLINE eq #-}
 
-newtype All a = All { getAll :: LTL a }
-
-instance Semigroup (All a) where
-  All x <> All y = All (combine x y)
-  {-# INLINE (<>) #-}
-
-instance Monoid (All a) where
-  mempty = All top
-  {-# INLINE mempty #-}
-  mappend = (<>)
-  {-# INLINE mappend #-}
-
-newtype Any a = Any { getAny :: LTL a }
-
-instance Semigroup (Any a) where
-  Any x <> Any y = Any (select x y)
-  {-# INLINE (<>) #-}
-
-instance Monoid (Any a) where
-  mempty = Any (bottom "mempty")
-  {-# INLINE mempty #-}
-  mappend = (<>)
-  {-# INLINE mappend #-}
+-- | Render a 'step' result as a string.
+showResult :: Show a => Either (LTL a) (Result a) -> String
+showResult (Left _)  = "<need input>"
+showResult (Right b) = show b
+{-# INLINE showResult #-}

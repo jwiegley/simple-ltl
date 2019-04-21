@@ -1,5 +1,5 @@
 name:                simple-ltl
-version:             1.0.0
+version:             2.0.0
 synopsis:            A simple LTL checker
 homepage:            https://www.github.com/jwiegley/simple-ltl
 license:             BSD3
