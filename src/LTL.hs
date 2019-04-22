@@ -85,43 +85,6 @@ data Result a
 
 type LTL a = Machine a (Result a)
 
-combine :: LTL a -> LTL a -> LTL a
-combine (Machine f) g = Machine $ \a ->
-  case f a of
-    Right (Failure e) -> Right (Failure (LeftFailed e))
-    Right Success     -> step g a
-    Left f' -> case step g a of
-      Right (Failure e) -> Right (Failure (RightFailed e))
-      Right Success     -> Left f'
-      Left g'           -> Left $! combine f' g'
-
-select :: LTL a -> LTL a -> LTL a
-select (Machine f) g = Machine $ \a ->
-  case f a of
-    Right Success      -> Right Success
-    Right (Failure e1) -> case step g a of
-      Right (Failure e2) -> Right (Failure (BothFailed e1 e2))
-      g'                 -> g'
-    Left f' -> case step g a of
-      Right Success     -> Right Success
-      Right (Failure _) -> Left f'
-      Left g'           -> Left $! select f' g'
-
-invert :: Result a -> Result a
-invert = \case
-  Success   -> Failure (HitBottom "neg")
-  Failure _ -> Success
-{-# INLINE invert #-}
-
--- | Negate a formula: ¬ p
-neg :: LTL a -> LTL a
-neg = fmap invert
-{-# INLINE neg #-}
-
-stop :: Result a -> LTL a
-stop = Machine . const . Right
-{-# INLINE stop #-}
-
 -- | ⊤, or "true"
 top :: LTL a
 top = stop Success
@@ -131,6 +94,61 @@ top = stop Success
 bottom :: String -> LTL a
 bottom = stop . Failure . HitBottom
 {-# INLINE bottom #-}
+
+-- | Negate a formula: ¬ p
+neg :: LTL a -> LTL a
+neg = fmap invert
+{-# INLINE neg #-}
+
+-- | Boolean conjunction: ∧
+and :: LTL a -> LTL a -> LTL a
+and (Machine f) g = Machine $ \a ->
+  case f a of
+    Right (Failure e) -> Right (Failure (LeftFailed e))
+    Right Success     -> step g a
+    Left f' -> case step g a of
+      Right (Failure e) -> Right (Failure (RightFailed e))
+      Right Success     -> Left f'
+      Left g'           -> Left $! f' `and` g'
+
+andNext :: LTL a -> LTL a -> LTL a
+andNext (Machine f) g = Machine $ \a ->
+  case f a of
+    Right (Failure e) -> Right (Failure (LeftFailed e))
+    Right Success     -> Left g
+    Left f'           -> Left $! f' `and` g
+{-# INLINE andNext #-}
+
+-- | Boolean disjunction: ∨
+or :: LTL a -> LTL a -> LTL a
+or (Machine f) g = Machine $ \a ->
+  case f a of
+    Right Success      -> Right Success
+    Right (Failure e1) -> case step g a of
+      Right (Failure e2) -> Right (Failure (BothFailed e1 e2))
+      g'                 -> g'
+    Left f' -> case step g a of
+      Right Success     -> Right Success
+      Right (Failure _) -> Left f'
+      Left g'           -> Left $! f' `or` g'
+
+orNext :: LTL a -> LTL a -> LTL a
+orNext (Machine f) g = Machine $ \a ->
+  case f a of
+    Right Success     -> Right Success
+    Right (Failure _) -> Left g
+    Left f'           -> Left $! f' `or` g
+{-# INLINE orNext #-}
+
+invert :: Result a -> Result a
+invert = \case
+  Success   -> Failure (HitBottom "neg")
+  Failure _ -> Success
+{-# INLINE invert #-}
+
+stop :: Result a -> LTL a
+stop = Machine . const . Right
+{-# INLINE stop #-}
 
 -- | Given an input element, provide a formula to determine its truth. These
 --   can be nested, making it possible to have conditional formulas.
@@ -143,16 +161,6 @@ reject :: (a -> LTL a) -> LTL a
 reject = neg . accept
 {-# INLINE reject #-}
 
--- | Boolean conjunction: ∧
-and :: LTL a -> LTL a -> LTL a
-and = combine
-{-# INLINE and #-}
-
--- | Boolean disjunction: ∨
-or :: LTL a -> LTL a -> LTL a
-or = select
-{-# INLINE or #-}
-
 -- | The "next" temporal modality, typically written 'X p' or '◯ p'.
 next :: LTL a -> LTL a
 next = Machine . const . Left
@@ -160,7 +168,7 @@ next = Machine . const . Left
 
 -- | The "until" temporal modality, typically written 'p U q'.
 until :: LTL a -> LTL a -> LTL a
-until p q = fix $ or q . combine p . next
+until p q = fix $ or q . andNext p
 {-# INLINE until #-}
 
 -- | Weak until.
@@ -170,7 +178,7 @@ weakUntil p q = (p `until` q) `or` always p
 
 -- | Release, the dual of 'until'.
 release :: LTL a -> LTL a -> LTL a
-release p q = fix $ and q . select p . next
+release p q = fix $ and q . orNext p
 {-# INLINE release #-}
 
 -- | Strong release.
