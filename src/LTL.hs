@@ -144,7 +144,15 @@ stop = Machine . const . Right
 {-# INLINE stop #-}
 
 -- | Given an input element, provide a formula to determine its truth. These
---   can be nested, making it possible to have conditional formulas.
+--   can be nested, making it possible to have conditional formulas. Consider
+--   the following:
+--
+-- @
+-- always (accept (\n -> next (eq (succ n))))
+-- @
+--
+--   One way to read this would be: "for every input n, always accept n if its
+--   next element is the successor".
 accept :: (a -> LTL a) -> LTL a
 accept f = Machine $ \a -> step (f a) a
 {-# INLINE accept #-}
