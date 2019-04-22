@@ -169,22 +169,22 @@ next = Machine . const . Left
 
 -- | The "until" temporal modality, typically written 'p U q'.
 until :: LTL a -> LTL a -> LTL a
-until p q = fix $ or q . andNext p
+until p = \q -> fix $ or q . andNext p
 {-# INLINE until #-}
 
 -- | Weak until.
 weakUntil :: LTL a -> LTL a -> LTL a
-weakUntil p q = (p `until` q) `or` always p
+weakUntil p = \q -> (p `until` q) `or` always p
 {-# INLINE weakUntil #-}
 
 -- | Release, the dual of 'until'.
 release :: LTL a -> LTL a -> LTL a
-release p q = fix $ and q . orNext p
+release p = \q -> fix $ and q . orNext p
 {-# INLINE release #-}
 
 -- | Strong release.
 strongRelease :: LTL a -> LTL a -> LTL a
-strongRelease p q = (p `release` q) `and` eventually p
+strongRelease p = \q -> (p `release` q) `and` eventually p
 {-# INLINE strongRelease #-}
 
 -- | Logical implication: p → q
