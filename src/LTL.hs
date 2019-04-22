@@ -29,7 +29,7 @@ module LTL
   ( LTL
   , Machine(..)
   , Reason(..)
-  , Result(..)
+  , Result
   , run
 
   , neg
@@ -76,23 +76,20 @@ data Reason a
   | BothFailed  (Reason a) (Reason a)
   | LeftFailed  (Reason a)
   | RightFailed (Reason a)
-  deriving (Show, Generic, NFData)
+  deriving (Show, Generic, NFData, Functor)
 
-data Result a
-  = Failure (Reason a)
-  | Success
-  deriving (Show, Generic, NFData)
+type Result a = Maybe (Reason a)
 
 type LTL a = Machine a (Result a)
 
 -- | ⊤, or "true"
 top :: LTL a
-top = stop Success
+top = stop Nothing
 {-# INLINE top #-}
 
 -- | ⊥, or "false"
 bottom :: String -> LTL a
-bottom = stop . Failure . HitBottom
+bottom = stop . Just . HitBottom
 {-# INLINE bottom #-}
 
 -- | Negate a formula: ¬ p
@@ -102,48 +99,44 @@ neg = fmap invert
 
 -- | Boolean conjunction: ∧
 and :: LTL a -> LTL a -> LTL a
-and (Machine f) g = Machine $ \a ->
-  case f a of
-    Right (Failure e) -> Right (Failure (LeftFailed e))
-    Right Success     -> step g a
-    Left f' -> case step g a of
-      Right (Failure e) -> Right (Failure (RightFailed e))
-      Right Success     -> Left f'
-      Left g'           -> Left $! f' `and` g'
+and (Machine f) g = Machine $ \a -> case f a of
+  Right (Just e) -> Right (Just (LeftFailed e))
+  Right Nothing  -> step g a
+  Left f'        -> case step g a of
+    Right (Just e) -> Right (Just (RightFailed e))
+    Right Nothing  -> Left f'
+    Left g'        -> Left $! f' `and` g'
 
 andNext :: LTL a -> LTL a -> LTL a
-andNext (Machine f) g = Machine $ \a ->
-  case f a of
-    Right (Failure e) -> Right (Failure (LeftFailed e))
-    Right Success     -> Left g
-    Left f'           -> Left $! f' `and` g
+andNext (Machine f) g = Machine $ \a -> case f a of
+  Right (Just e) -> Right (Just (LeftFailed e))
+  Right Nothing  -> Left g
+  Left f'        -> Left $! f' `and` g
 {-# INLINE andNext #-}
 
 -- | Boolean disjunction: ∨
 or :: LTL a -> LTL a -> LTL a
-or (Machine f) g = Machine $ \a ->
-  case f a of
-    Right Success      -> Right Success
-    Right (Failure e1) -> case step g a of
-      Right (Failure e2) -> Right (Failure (BothFailed e1 e2))
-      g'                 -> g'
-    Left f' -> case step g a of
-      Right Success     -> Right Success
-      Right (Failure _) -> Left f'
-      Left g'           -> Left $! f' `or` g'
+or (Machine f) g = Machine $ \a -> case f a of
+  Right Nothing   -> Right Nothing
+  Right (Just e1) -> case step g a of
+    Right (Just e2) -> Right (Just (BothFailed e1 e2))
+    g'              -> g'
+  Left f' -> case step g a of
+    Right Nothing  -> Right Nothing
+    Right (Just _) -> Left f'
+    Left g'        -> Left $! f' `or` g'
 
 orNext :: LTL a -> LTL a -> LTL a
-orNext (Machine f) g = Machine $ \a ->
-  case f a of
-    Right Success     -> Right Success
-    Right (Failure _) -> Left g
-    Left f'           -> Left $! f' `or` g
+orNext (Machine f) g = Machine $ \a -> case f a of
+  Right Nothing  -> Right Nothing
+  Right (Just _) -> Left g
+  Left f'        -> Left $! f' `or` g
 {-# INLINE orNext #-}
 
 invert :: Result a -> Result a
 invert = \case
-  Success   -> Failure (HitBottom "neg")
-  Failure _ -> Success
+  Nothing -> Just (HitBottom "neg")
+  Just _  -> Nothing
 {-# INLINE invert #-}
 
 stop :: Result a -> LTL a
