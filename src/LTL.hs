@@ -35,6 +35,7 @@ module LTL
   , neg
   , top
   , bottom
+  , examine
   , accept
   , reject
   , LTL.and
@@ -148,18 +149,22 @@ stop = Machine . const . Right
 --   the following:
 --
 -- @
--- always (accept (\n -> next (eq (succ n))))
+-- always (examine (\n -> next (eq (succ n))))
 -- @
 --
---   One way to read this would be: "for every input n, always accept n if its
+--   One way to read this would be: "for every input n, always examine n if its
 --   next element is the successor".
+examine :: (a -> LTL a) -> LTL a
+examine f = Machine $ \a -> step (f a) a
+{-# INLINE examine #-}
+
 accept :: (a -> LTL a) -> LTL a
-accept f = Machine $ \a -> step (f a) a
+accept = examine
 {-# INLINE accept #-}
 
--- | The opposite in meaning to 'accept', defined simply as 'neg . accept'.
+-- | The opposite in meaning to 'examine', defined simply as 'neg . examine'.
 reject :: (a -> LTL a) -> LTL a
-reject = neg . accept
+reject = neg . examine
 {-# INLINE reject #-}
 
 -- | The "next" temporal modality, typically written 'X p' or '◯ p'.
@@ -210,7 +215,7 @@ truth False = bottom "truth"
 
 -- | True if the given predicate on the input is true.
 is :: (a -> Bool) -> LTL a
-is = accept . (truth .)
+is = examine . (truth .)
 {-# INLINE is #-}
 
 -- | Another name for 'is'.
