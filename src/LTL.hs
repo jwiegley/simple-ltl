@@ -43,13 +43,11 @@ module LTL
     LTL.until,
     weakUntil,
     release,
-    weakRelease,
     strongRelease,
     implies,
     eventually,
     weakEventually,
     always,
-    weakAlways,
     truth,
     test,
     is,
@@ -247,19 +245,16 @@ weakUntil p = \q -> LTL $ \el _weak -> case el of
 
 -- | Release, the dual of 'until'.
 release :: LTL a -> LTL a -> LTL a
-release p = \q -> fix $ and q . orNext p
-{-# INLINE release #-}
+release p = \q -> LTL $ \el _weak -> case el of
+  Nothing -> Success
+  Just _ -> step (and q (or p (next (release p q)))) el Weak
+{-# INLINEABLE release #-}
 
 -- | Strong release.
 strongRelease :: LTL a -> LTL a -> LTL a
-strongRelease p = \q -> (p `release` q) `and` eventually p
+strongRelease p = \q -> fix $ and q . orNext p
+-- strongRelease p = \q -> (p `release` q) `and` eventually p
 {-# INLINE strongRelease #-}
-
-weakRelease :: LTL a -> LTL a -> LTL a
-weakRelease p = \q -> LTL $ \el _weak -> case el of
-  Nothing -> Success
-  Just _ -> step (and q (or p (next (weakRelease p q)))) el Weak
-{-# INLINEABLE weakRelease #-}
 
 -- | Logical implication: p → q
 implies :: LTL a -> LTL a -> LTL a
@@ -280,11 +275,6 @@ weakEventually = weakUntil top
 always :: LTL a -> LTL a
 always = release (bottom "always")
 {-# INLINE always #-}
-
--- | Always the formula must hold, typically written G p or □ p.
-weakAlways :: LTL a -> LTL a
-weakAlways = weakRelease (bottom "weakAlways")
-{-# INLINE weakAlways #-}
 
 -- | True if the given Haskell boolean is true.
 truth :: Bool -> LTL a

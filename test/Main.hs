@@ -23,10 +23,10 @@ main =
       "LTL tests"
       [ testCase "even or odd/1" $
           assertFormula [1 .. 100] $
-            weakAlways (test odd `or` (test even `and` next (test odd))),
+            always (test odd `or` (test even `and` next (test odd))),
         testCase "even or odd/2" $
           assertFormula [1 .. 100] $
-            weakAlways (test odd `until` test even),
+            always (test odd `until` test even),
         testCase "eventually >10" $
           assertFormula [1 .. 100] $
             eventually (test (> 10)),
@@ -37,15 +37,15 @@ main =
           assertFormula [1 .. 100] $
             weakEventually (test (> 100)),
         testCase "always <100" $
-          assertFormulaFailed [1 .. 99] $
-            always (test (< 100)),
-        testCase "weakAlways <100" $
           assertFormula [1 .. 99] $
-            weakAlways (test (< 100)),
+            always (test (< 100)),
         testCase "even or odd/3" $
           assertFormula [1 .. 2] $
             neg $ test even `and` next (test odd),
         testCase "subsequent" $
           assertFormula [1 .. 100] $
-            weakAlways (accept (\n -> next (eq (succ n))))
+            always (examine (\n -> next (eq (succ n)))),
+        testCase "strongRelease" $
+          assertFormulaFailed [1 .. 100] $
+            strongRelease (bottom "always") (examine (next . eq . succ))
       ]
