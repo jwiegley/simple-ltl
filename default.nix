@@ -16,14 +16,23 @@
 let haskellPackages = pkgs.haskell.packages.${ghcCompiler};
 
 in haskellPackages.developPackage rec {
-  name = "haskell-${ghcCompiler}-simple-ltl";
+  # name = "haskell-${ghcCompiler}-simple-ltl";
   root = ./.;
 
   source-overrides = {};
   overrides = self: super: with pkgs.haskell.lib; {};
 
   modifier = drv: pkgs.haskell.lib.overrideCabal drv (attrs: {
-    benchmarkDepends = (attrs.buildToolDepends or []) ++ [
+    buildTools = (attrs.buildTools or []) ++ [
+      haskellPackages.cabal-install
+      haskellPackages.hpack
+      haskellPackages.hoogle
+      haskellPackages.hasktags
+      haskellPackages.ghcid
+      haskellPackages.ormolu
+    ];
+
+    benchmarkDepends = (attrs.benchmarkDepends or []) ++ [
       pkgs.haskellPackages.criterion
     ];
 

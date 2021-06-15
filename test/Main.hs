@@ -1,33 +1,51 @@
 module Main where
 
+import Data.List hiding (and, or)
 import LTL
 import Test.Tasty
 import Test.Tasty.HUnit
-import Data.List hiding (and, or)
 import Prelude hiding (and, or, until)
 
 assertFormula :: [Int] -> LTL Int -> Assertion
 assertFormula xs formula = case run formula xs of
-  Right (Just e) -> assertFailure $ "Failed: " ++ show e
+  Failed e -> assertFailure $ "Failed: " ++ show e
   _ -> return ()
 
-assertFormulaComplete :: [Int] -> LTL Int -> Assertion
-assertFormulaComplete xs formula = case run formula xs of
-  Right (Just e) -> assertFailure $ "Failed: " ++ show e
-  Right Nothing -> return ()
-  _ -> assertFailure "Incomplete"
+assertFormulaFailed :: [Int] -> LTL Int -> Assertion
+assertFormulaFailed xs formula = case run formula xs of
+  Failed _ -> return ()
+  _ -> assertFailure "Failed"
 
 main :: IO ()
-main = defaultMain $ testGroup "LTL tests"
-  [ testCase "even or odd/1" $ assertFormula [1..100] $
-      always (test odd `or` (test even `and` next (test odd)))
-
-  , testCase "even or odd/2" $ assertFormula [1..100] $
-      always (test odd `until` test even)
-
-  , testCase "even or odd/3" $ assertFormulaComplete [1..2] $
-      neg $ test even `and` next (test odd)
-
-  , testCase "subsequent" $ assertFormula [1..100] $
-      always (accept (\n -> next (eq (succ n))))
-  ]
+main =
+  defaultMain $
+    testGroup
+      "LTL tests"
+      [ testCase "even or odd/1" $
+          assertFormula [1 .. 100] $
+            weakAlways (test odd `or` (test even `and` next (test odd))),
+        testCase "even or odd/2" $
+          assertFormula [1 .. 100] $
+            weakAlways (test odd `until` test even),
+        testCase "eventually >10" $
+          assertFormula [1 .. 100] $
+            eventually (test (> 10)),
+        testCase "eventually >100" $
+          assertFormulaFailed [1 .. 100] $
+            eventually (test (> 100)),
+        testCase "weakEventually >100" $
+          assertFormula [1 .. 100] $
+            weakEventually (test (> 100)),
+        testCase "always <100" $
+          assertFormulaFailed [1 .. 99] $
+            always (test (< 100)),
+        testCase "weakAlways <100" $
+          assertFormula [1 .. 99] $
+            weakAlways (test (< 100)),
+        testCase "even or odd/3" $
+          assertFormula [1 .. 2] $
+            neg $ test even `and` next (test odd),
+        testCase "subsequent" $
+          assertFormula [1 .. 100] $
+            weakAlways (accept (\n -> next (eq (succ n))))
+      ]

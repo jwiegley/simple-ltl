@@ -26,35 +26,36 @@
 --   For the meaning of almost all the functions in the module, see
 --   https://en.wikipedia.org/wiki/Linear_temporal_logic
 module LTL
-  ( LTL
-  , Machine(..)
-  , Reason(..)
-  , Result
-  , run
-
-  , neg
-  , top
-  , bottom
-  , examine
-  , accept
-  , reject
-  , LTL.and
-  , LTL.or
-  , next
-  , LTL.until
-  , weakUntil
-  , release
-  , strongRelease
-  , implies
-  , eventually
-  , always
-  , truth
-  , test
-  , is
-  , eq
-
-  , showResult
-  ) where
+  ( LTL,
+    Answer (..),
+    run,
+    neg,
+    top,
+    bottom,
+    examine,
+    accept,
+    reject,
+    LTL.and,
+    LTL.or,
+    next,
+    orNext,
+    andNext,
+    LTL.until,
+    weakUntil,
+    release,
+    weakRelease,
+    strongRelease,
+    implies,
+    eventually,
+    weakEventually,
+    always,
+    weakAlways,
+    truth,
+    test,
+    is,
+    eq,
+  )
+where
 
 import Control.DeepSeq
 import Data.Function (fix)
@@ -62,86 +63,138 @@ import Data.List (foldl')
 import GHC.Generics
 import Prelude hiding (and, or, until)
 
-newtype Machine a b = Machine { step :: a -> Either (Machine a b) b }
-
-instance Functor (Machine a) where
-  fmap f (Machine k) = Machine $ either (Left . fmap f) (Right . f) . k
-
-run :: Machine a b -> [a] -> Either (Machine a b) b
-run = foldl' (either step (const . Right)) . Left
-{-# INLINE run #-}
+data Weakness = Weak | Strong
 
 data Reason a
-  = HitBottom   String
-  | Rejected    a
-  | BothFailed  (Reason a) (Reason a)
-  | LeftFailed  (Reason a)
+  = HitBottom String
+  | Rejected a
+  | BothFailed (Reason a) (Reason a)
+  | LeftFailed (Reason a)
   | RightFailed (Reason a)
   deriving (Show, Generic, NFData, Functor)
 
-type Result a = Maybe (Reason a)
+data PartialAnswer a
+  = Abort (Reason a)
+  | Failure (Reason a)
+  | Continue Weakness (LTL a)
+  | Success
+  deriving (Generic)
 
-type LTL a = Machine a (Result a)
+instance Show a => Show (PartialAnswer a) where
+  show (Continue _ _) = "<need input>"
+  show (Abort res) = "Abort: " ++ show res
+  show (Failure res) = "Failure: " ++ show res
+  show Success = "Success"
+  {-# INLINEABLE show #-}
+
+data Answer a
+  = Failed (Reason a)
+  | Succeeded
+  deriving (Generic, Functor)
+
+finish :: PartialAnswer a -> Answer a
+finish = \case
+  Abort reason -> Failed reason
+  Failure reason -> Failed reason
+  Continue weak (LTL formula) -> case formula Nothing weak of
+    Abort reason -> Failed reason
+    Failure reason -> Failed reason
+    Continue Weak _ -> Succeeded
+    Continue Strong _ ->
+      Failed (HitBottom "Failed to determine formula by end of stream")
+    Success -> Succeeded
+  Success -> Succeeded
+{-# INLINEABLE finish #-}
+
+newtype LTL a = LTL {step :: Maybe a -> Weakness -> PartialAnswer a}
+
+run :: LTL a -> [a] -> Answer a
+run formula xs =
+  finish $
+    foldl'
+      ( \acc x -> case acc of
+          Continue weak f -> step f (Just x) weak
+          res -> res
+      )
+      (Continue Strong formula)
+      xs
+{-# INLINEABLE run #-}
 
 -- | ⊤, or "true"
 top :: LTL a
-top = stop Nothing
+top = stop Succeeded
 {-# INLINE top #-}
 
 -- | ⊥, or "false"
 bottom :: String -> LTL a
-bottom = stop . Just . HitBottom
+bottom = stop . Failed . HitBottom
 {-# INLINE bottom #-}
+
+mapAnswer :: (PartialAnswer a -> PartialAnswer a) -> LTL a -> LTL a
+mapAnswer f formula = LTL $ \el weak -> f (step formula el weak)
+{-# INLINE mapAnswer #-}
 
 -- | Negate a formula: ¬ p
 neg :: LTL a -> LTL a
-neg = fmap invert
+neg = mapAnswer invert
 {-# INLINE neg #-}
+
+invert :: PartialAnswer a -> PartialAnswer a
+invert = \case
+  Success -> Failure (HitBottom "neg")
+  Failure _ -> Success
+  Abort e -> Abort e
+  Continue w f -> Continue w (neg f)
+{-# INLINEABLE invert #-}
 
 -- | Boolean conjunction: ∧
 and :: LTL a -> LTL a -> LTL a
-and (Machine f) g = Machine $ \a -> case f a of
-  Right (Just e) -> Right (Just (LeftFailed e))
-  Right Nothing  -> step g a
-  Left f'        -> case step g a of
-    Right (Just e) -> Right (Just (RightFailed e))
-    Right Nothing  -> Left f'
-    Left g'        -> Left $! f' `and` g'
+and (LTL f) g = LTL $ \el weak -> case f el weak of
+  Abort e -> Abort (LeftFailed e)
+  Failure e -> Failure (LeftFailed e)
+  Success -> step g el weak
+  Continue w f' -> case step g el w of
+    Abort e -> Abort (RightFailed e)
+    Failure e -> Failure (RightFailed e)
+    Success -> Continue w f'
+    Continue w' g' -> Continue w' $! f' `and` g'
+{-# INLINEABLE and #-}
 
 andNext :: LTL a -> LTL a -> LTL a
-andNext (Machine f) g = Machine $ \a -> case f a of
-  Right (Just e) -> Right (Just (LeftFailed e))
-  Right Nothing  -> Left g
-  Left f'        -> Left $! f' `and` g
-{-# INLINE andNext #-}
+andNext (LTL f) g = LTL $ \el weak -> case f el weak of
+  Abort e -> Abort (LeftFailed e)
+  Failure e -> Failure (LeftFailed e)
+  Success -> Continue weak g
+  Continue w f' -> Continue w $! f' `and` g
+{-# INLINEABLE andNext #-}
 
 -- | Boolean disjunction: ∨
 or :: LTL a -> LTL a -> LTL a
-or (Machine f) g = Machine $ \a -> case f a of
-  Right Nothing   -> Right Nothing
-  Right (Just e1) -> case step g a of
-    Right (Just e2) -> Right (Just (BothFailed e1 e2))
-    g'              -> g'
-  Left f' -> case step g a of
-    Right Nothing  -> Right Nothing
-    Right (Just _) -> Left f'
-    Left g'        -> Left $! f' `or` g'
+or (LTL f) g = LTL $ \el weak -> case f el weak of
+  Success -> Success
+  Abort e -> Abort (LeftFailed e)
+  Failure e1 -> case step g el weak of
+    Failure e2 -> Failure (BothFailed e1 e2)
+    g' -> g'
+  Continue w f' -> case step g el w of
+    Success -> Success
+    Abort e -> Abort (RightFailed e)
+    Failure _ -> Continue w f'
+    Continue w' g' -> Continue w' $! f' `or` g'
+{-# INLINEABLE or #-}
 
 orNext :: LTL a -> LTL a -> LTL a
-orNext (Machine f) g = Machine $ \a -> case f a of
-  Right Nothing  -> Right Nothing
-  Right (Just _) -> Left g
-  Left f'        -> Left $! f' `or` g
-{-# INLINE orNext #-}
+orNext (LTL f) g = LTL $ \el weak -> case f el weak of
+  Success -> Success
+  Abort e -> Abort (LeftFailed e)
+  Failure _ -> Continue weak g
+  Continue w f' -> Continue w $! f' `or` g
+{-# INLINEABLE orNext #-}
 
-invert :: Result a -> Result a
-invert = \case
-  Nothing -> Just (HitBottom "neg")
-  Just _  -> Nothing
-{-# INLINE invert #-}
-
-stop :: Result a -> LTL a
-stop = Machine . const . Right
+stop :: Answer a -> LTL a
+stop x = LTL $ \_ _ -> case x of
+  Failed r -> Failure r
+  Succeeded -> Success
 {-# INLINE stop #-}
 
 -- | Given an input element, provide a formula to determine its truth. These
@@ -155,7 +208,11 @@ stop = Machine . const . Right
 --   One way to read this would be: "for every input n, always examine n if its
 --   next element is the successor".
 examine :: (a -> LTL a) -> LTL a
-examine f = Machine $ \a -> step (f a) a
+examine f = LTL $ \el weak -> case el of
+  Nothing -> case weak of
+    Weak -> Success
+    Strong -> Failure (HitBottom "examine has no meaning at end of stream")
+  Just a -> step (f a) (Just a) weak
 {-# INLINE examine #-}
 
 accept :: (a -> LTL a) -> LTL a
@@ -169,8 +226,12 @@ reject = neg . examine
 
 -- | The "next" temporal modality, typically written 'X p' or '◯ p'.
 next :: LTL a -> LTL a
-next = Machine . const . Left
-{-# INLINE next #-}
+next f = LTL $ \el weak -> case el of
+  Nothing -> case weak of
+    Weak -> Success
+    Strong -> Failure (HitBottom "next has no meaning at end of stream")
+  Just _ -> Continue weak f
+{-# INLINEABLE next #-}
 
 -- | The "until" temporal modality, typically written 'p U q'.
 until :: LTL a -> LTL a -> LTL a
@@ -179,7 +240,9 @@ until p = \q -> fix $ or q . andNext p
 
 -- | Weak until.
 weakUntil :: LTL a -> LTL a -> LTL a
-weakUntil p = \q -> (p `until` q) `or` always p
+weakUntil p = \q -> LTL $ \el _weak -> case el of
+  Nothing -> Success
+  Just _ -> step (or q (and p (next (weakUntil p q)))) el Weak
 {-# INLINE weakUntil #-}
 
 -- | Release, the dual of 'until'.
@@ -192,6 +255,12 @@ strongRelease :: LTL a -> LTL a -> LTL a
 strongRelease p = \q -> (p `release` q) `and` eventually p
 {-# INLINE strongRelease #-}
 
+weakRelease :: LTL a -> LTL a -> LTL a
+weakRelease p = \q -> LTL $ \el _weak -> case el of
+  Nothing -> Success
+  Just _ -> step (and q (or p (next (weakRelease p q)))) el Weak
+{-# INLINEABLE weakRelease #-}
+
 -- | Logical implication: p → q
 implies :: LTL a -> LTL a -> LTL a
 implies = or . neg
@@ -202,14 +271,24 @@ eventually :: LTL a -> LTL a
 eventually = until top
 {-# INLINE eventually #-}
 
+-- | Eventually the formula will hold, typically written F p or ◇ p.
+weakEventually :: LTL a -> LTL a
+weakEventually = weakUntil top
+{-# INLINE weakEventually #-}
+
 -- | Always the formula must hold, typically written G p or □ p.
 always :: LTL a -> LTL a
 always = release (bottom "always")
 {-# INLINE always #-}
 
+-- | Always the formula must hold, typically written G p or □ p.
+weakAlways :: LTL a -> LTL a
+weakAlways = weakRelease (bottom "weakAlways")
+{-# INLINE weakAlways #-}
+
 -- | True if the given Haskell boolean is true.
 truth :: Bool -> LTL a
-truth True  = top
+truth True = top
 truth False = bottom "truth"
 {-# INLINE truth #-}
 
@@ -227,9 +306,3 @@ test = is
 eq :: Eq a => a -> LTL a
 eq = is . (==)
 {-# INLINE eq #-}
-
--- | Render a 'step' result as a string.
-showResult :: Show a => Either (LTL a) (Result a) -> String
-showResult (Left _)  = "<need input>"
-showResult (Right b) = show b
-{-# INLINE showResult #-}
