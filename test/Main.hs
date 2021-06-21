@@ -23,7 +23,7 @@ main =
       "LTL tests"
       [ testCase "even or odd/1" $
           assertFormula [1 .. 100] $
-            always (test odd `or` (test even `and` next (test odd))),
+            always (test odd `or` (test even `and` weak next (test odd))),
         testCase "even or odd/2" $
           assertFormula [1 .. 100] $
             always (test odd `until` test even),
@@ -33,9 +33,12 @@ main =
         testCase "eventually >100" $
           assertFormulaFailed [1 .. 100] $
             eventually (test (> 100)),
-        testCase "weakEventually >100" $
+        -- @weak eventually@ is a useless statement, since it inefficiently
+        -- verifies that p is either true or not true. This test just checks
+        -- the 'weak' combinator.
+        testCase "weak eventually >100" $
           assertFormula [1 .. 100] $
-            weakEventually (test (> 100)),
+            weak eventually (test (> 100)),
         testCase "always <100" $
           assertFormula [1 .. 99] $
             always (test (< 100)),
@@ -44,8 +47,8 @@ main =
             neg $ test even `and` next (test odd),
         testCase "subsequent" $
           assertFormula [1 .. 100] $
-            always (examine (\n -> next (eq (succ n)))),
+            always (examine (\n -> weak next (eq (succ n)))),
         testCase "strongRelease" $
           assertFormulaFailed [1 .. 100] $
-            strongRelease (bottom "always") (examine (next . eq . succ))
+            strongRelease (bottom "always") (examine (\n -> next (eq (succ n))))
       ]
